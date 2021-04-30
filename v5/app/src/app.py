@@ -16,8 +16,9 @@ dataset_loc = f'{iexec_in}/{dataset}'
 
 deterministic_file = 'result.txt'  # file used for deterministic comparison
 
-default_coins = ['BTC', 'ETH']  # will always be in query
-max_input = 10  # default number of user input/coins (does not include default)
+default_coins = ['BTC', 'ETH', 'DOGE', 'XRP', 'LTC', 'ADA', 'XMR', 'XLM', 'BNB', 'DOT']  # default if min user input
+max_input = 20  # max number of user input/coins
+min_input = 2  # min number of user input/coins
 
 
 class ErrorCallback(Exception):
@@ -27,7 +28,8 @@ class ErrorCallback(Exception):
         3: "general bigquery query error",
         4: "error creating csv",
         5: "auto callback test error",
-        6: "general dapp error"
+        6: "general dapp error",
+        7: "no results"
     }
 
     def __init__(self, code):
@@ -125,11 +127,7 @@ def analyze_user_input(a):
     try:
         dapp_input = a[1:]
     except IndexError:
-        dapp_input = None
-
-    # for testing purposes
-    if 'E5CB' in dapp_input:
-        return 5
+        dapp_input = []
 
     for arg in dapp_input:
         if arg.isalnum():
@@ -139,7 +137,7 @@ def analyze_user_input(a):
                     break
                 dapp_input_valid.append(arg.upper())
 
-    return sorted(list(set(dapp_input_valid)))
+    return dapp_input_valid
 
 
 def get_dataset_table(j):
@@ -157,6 +155,7 @@ if __name__ == '__main__':
 
     stdout(f'Start: {str(time())}')
     stdout(f'Max Input: {max_input}')
+    stdout(f'Min Input: {min_input}')
     stdout(f'Default Coins: {default_coins}')
     stdout(f'Input: {sys_argv}')
 
@@ -166,10 +165,18 @@ if __name__ == '__main__':
     stdout(f'running dapp...')
 
     try:
-        if user_input_valid == 5:
+        # for testing purposes
+        if 'E5CB' in user_input_valid:
             raise ErrorCallback(5)
 
-        coins = sorted(list(set(user_input_valid + default_coins)))
+        # need a hardcoded coin list to avoid input of invalid coins
+
+        coins = set(user_input_valid)
+
+        while len(coins) < min_input:
+            coins.add(default_coins.pop(0))
+
+        coins = sorted(list(coins))
         coins_sql = ', '.join(f'"{c}"' for c in coins)
 
         table = get_dataset_table(dataset_loc)
@@ -196,16 +203,19 @@ if __name__ == '__main__':
             raise ErrorCallback(3)
 
         results = list(q)
+        if len(results) == 0:
+            raise ErrorCallback(7)
+
         stdout(f'results received...')
 
         csv_success = create_csv(results)
-        if csv_success:
-            stdout(f'data.csv created...')
-        else:
+        if not csv_success:
             raise ErrorCallback(4)
 
+        stdout(f'data.csv created...')
+
         create_receipt(
-            f'Google Cloud - Big Query Receipt\n'
+            f'Google Cloud - BigQuery Receipt\n'
             f'Created: {q.created}\n'
             f'Job ID: {q.job_id}\n'
             f'Job Type: {q.job_type}\n'
@@ -233,7 +243,7 @@ if __name__ == '__main__':
         error = 'ERROR: (6) general dapp error'
 
     # without a deterministic the worker freezes
-    # cant combo deterministic with callback error or replace...
+    # cant combo deterministic with callback error or replace
     # must always upload to IPFS on error?
 
     if error:
